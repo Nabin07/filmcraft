@@ -2737,13 +2737,14 @@ fn build() -> Vec<CommandSpec> {
             "Set Effect Parameter",
             [],
             None,
-            r##"{"clip":id,"effect":"motion"|index,"param":str,"mask":n?,"value":num|[x,y]|"#rrggbb"|bool|path|"option name" (a choice takes its index or its name),"time":ticks? (where the keyframe goes when the parameter is animated, kept there even outside the clip; default: the playhead, pinned to the clip; a parameter that is not animated gets a new static value whatever the time),"keyframe":bool? (true: write a keyframe at `time` and animate the parameter),"merge":bool?,"begin":bool?}"##,
+            r##"{"clip":id,"effect":"motion"|index,"node":n? (a node of the clip's node grade instead of `effect`),"param":str,"mask":n?,"value":num|[x,y]|"#rrggbb"|bool|path|"option name" (a choice takes its index or its name),"time":ticks? (where the keyframe goes when the parameter is animated, kept there even outside the clip; default: the playhead, pinned to the clip; a parameter that is not animated gets a new static value whatever the time),"keyframe":bool? (true: write a keyframe at `time` and animate the parameter),"merge":bool?,"begin":bool?}"##,
             has_seq,
             |s, p| {
                 let c = clip_p(p, "clip").ok_or_else(|| bad("effects.setParam", "need `clip`"))?;
                 let pid = str_p(p, "param").ok_or_else(|| bad("effects.setParam", "need `param`"))?.to_string();
                 let val = p.get("value").cloned().ok_or_else(|| bad("effects.setParam", "need `value`"))?;
                 let eff = p.get("effect").cloned().unwrap_or(json!("motion"));
+                let node = u64_p(p, "node");
                 let keyframe = bool_p(p, "keyframe").unwrap_or(false);
                 // an explicit `time` outside the clip keeps its keyframe there, before the start as after
                 // the end, so a ramp across a cut keeps its slope (#1055); the playhead is pinned to the clip
@@ -2751,19 +2752,15 @@ fn build() -> Vec<CommandSpec> {
                 let ph = s.playhead();
                 let pq = p.clone();
                 // `merge`: a drag of one parameter is one undo step (#201); `begin` starts a new one
-                let merge = bool_p(p, "merge").unwrap_or(false).then(|| format!("setParam:{}:{eff}:{pid}:{}", c.0, p.get("mask").unwrap_or(&Value::Null)));
+                let merge =
+                    bool_p(p, "merge").unwrap_or(false).then(|| format!("setParam:{}:{eff}:{pid}:{}:{node:?}", c.0, p.get("mask").unwrap_or(&Value::Null)));
                 if bool_p(p, "begin").unwrap_or(false) {
                     s.history.merge_key = None;
                 }
                 let keyframes = s.edit_sequence_as("Change Effect Parameter", merge.as_deref(), |q, _, _| {
                     let (_, it) = q.find_item_mut(c).ok_or(filmcraft_edit::EditError::NoItem(c))?;
                     let mt = it.source_time_at(at.unwrap_or_else(|| ph.clamp(it.start, (it.end() - Tick(1)).max(it.start))));
-                    let e = match &eff {
-                        Value::Number(n) => it.effects.get_mut(n.as_u64().unwrap_or(0) as usize),
-                        Value::String(sid) => it.effects.iter_mut().find(|e| &e.effect == sid),
-                        _ => None,
-                    }
-                    .ok_or_else(|| bad("effects.setParam", "no such effect on clip"))?;
+                    let e = effect_target(it, &eff, node).ok_or_else(|| bad("effects.setParam", "no such effect on clip"))?;
                     // the parameter's definition (a mask's own parameters have none)
                     let def = if pq.get("mask").is_none_or(Value::is_null) { e.def().and_then(|d| d.param(&pid)) } else { None };
                     // a choice takes its option name as well as its index, as transition parameters do
@@ -2826,16 +2823,12 @@ fn build() -> Vec<CommandSpec> {
             let c = clip_p(p, "clip").ok_or_else(|| bad("effects.toggleAnimation", "need `clip`"))?;
             let pid = str_p(p, "param").ok_or_else(|| bad("effects.toggleAnimation", "need `param`"))?.to_string();
             let eff = p.get("effect").cloned().unwrap_or(json!("motion"));
+            let node = u64_p(p, "node");
             let ph = s.playhead();
             s.edit_sequence("Toggle Animation", |q, _, _| {
                 let (_, it) = q.find_item_mut(c).ok_or(filmcraft_edit::EditError::NoItem(c))?;
                 let mt = it.source_time_at(ph.clamp(it.start, (it.end() - Tick(1)).max(it.start)));
-                let e = match &eff {
-                    Value::Number(n) => it.effects.get_mut(n.as_u64().unwrap_or(0) as usize),
-                    Value::String(sid) => it.effects.iter_mut().find(|e| &e.effect == sid),
-                    _ => None,
-                }
-                .ok_or_else(|| bad("effects.toggleAnimation", "no such effect"))?;
+                let e = effect_target(it, &eff, node).ok_or_else(|| bad("effects.toggleAnimation", "no such effect"))?;
                 crate::masks::target_param(e, p, &pid).ok_or_else(|| bad("effects.toggleAnimation", "no such param"))?.toggle_animation(mt);
                 Ok(())
             })?;
@@ -2872,17 +2865,13 @@ fn build() -> Vec<CommandSpec> {
             let c = clip_p(p, "clip").ok_or_else(|| bad("effects.resetParam", "need `clip`"))?;
             let pid = str_p(p, "param").ok_or_else(|| bad("effects.resetParam", "need `param`"))?.to_string();
             let eff = p.get("effect").cloned().unwrap_or(json!("motion"));
+            let node = u64_p(p, "node");
             let frame = s.active_sequence().map(|q| (q.settings.width, q.settings.height)).unwrap_or((1920, 1080));
             let ph = s.playhead();
             s.edit_sequence("Reset Parameter", |q, _, _| {
                 let (_, it) = q.find_item_mut(c).ok_or(filmcraft_edit::EditError::NoItem(c))?;
                 let mt = it.source_time_at(ph.clamp(it.start, (it.end() - Tick(1)).max(it.start)));
-                let e = match &eff {
-                    Value::Number(n) => it.effects.get_mut(n.as_u64().unwrap_or(0) as usize),
-                    Value::String(sid) => it.effects.iter_mut().find(|e| &e.effect == sid),
-                    _ => None,
-                }
-                .ok_or_else(|| bad("effects.resetParam", "no such effect on clip"))?;
+                let e = effect_target(it, &eff, node).ok_or_else(|| bad("effects.resetParam", "no such effect on clip"))?;
                 if !reset_params(e, Some(&pid), frame, mt) {
                     return Err(bad("effects.resetParam", format!("no param `{pid}`")));
                 }
@@ -3102,6 +3091,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::multicam::commands());
     v.extend(crate::essential_sound::commands());
     v.extend(crate::color::commands());
+    v.extend(crate::grade::commands());
     v.extend(crate::graphics::commands());
     v.extend(crate::graphic_templates::commands());
     v.extend(crate::shortcuts::commands());
@@ -3158,6 +3148,7 @@ fn keyframe_op(s: &mut Session, p: &Value, op: &str) -> Result<Value> {
     let c = clip_p(p, "clip").ok_or_else(|| bad("keyframe", "need `clip`"))?;
     let pid = str_p(p, "param").ok_or_else(|| bad("keyframe", "need `param`"))?.to_string();
     let eff = p.get("effect").cloned().unwrap_or(json!("motion"));
+    let node = u64_p(p, "node");
     let ph = time_p(s, p, "").unwrap_or(s.playhead());
     let mtime = p.get("mediaTime").and_then(Value::as_i64).map(Tick);
     let to = p.get("to").and_then(Value::as_i64).map(Tick);
@@ -3170,19 +3161,14 @@ fn keyframe_op(s: &mut Session, p: &Value, op: &str) -> Result<Value> {
         _ => "Keyframe Interpolation",
     };
     // a keyframe dragged on the timeline is one undo step, like a dragged value
-    let merge = bool_p(p, "merge").unwrap_or(false).then(|| format!("keyframe:{op}:{}:{eff}:{pid}:{}", c.0, p.get("mask").unwrap_or(&Value::Null)));
+    let merge = bool_p(p, "merge").unwrap_or(false).then(|| format!("keyframe:{op}:{}:{eff}:{pid}:{}:{node:?}", c.0, p.get("mask").unwrap_or(&Value::Null)));
     if bool_p(p, "begin").unwrap_or(false) {
         s.history.merge_key = None;
     }
     s.edit_sequence_as(label, merge.as_deref(), |q, _, _| {
         let (_, it) = q.find_item_mut(c).ok_or(filmcraft_edit::EditError::NoItem(c))?;
         let mt_now = it.source_time_at(ph.clamp(it.start, (it.end() - Tick(1)).max(it.start)));
-        let e = match &eff {
-            Value::Number(n) => it.effects.get_mut(n.as_u64().unwrap_or(0) as usize),
-            Value::String(sid) => it.effects.iter_mut().find(|e| &e.effect == sid),
-            _ => None,
-        }
-        .ok_or_else(|| bad("keyframe", "no such effect"))?;
+        let e = effect_target(it, &eff, node).ok_or_else(|| bad("keyframe", "no such effect"))?;
         let prm = crate::masks::target_param(e, p, &pid).ok_or_else(|| bad("keyframe", "no such param"))?;
         match op {
             "add" => {
@@ -3280,6 +3266,19 @@ fn mark(s: &mut Session, p: &Value, is_in: bool) -> Result<Value> {
         Ok(())
     })?;
     Ok(Value::Null)
+}
+
+/// The effect a parameter command addresses: with `node`, that corrector of the clip's node grade
+/// (`grade.*`); else the stack effect `effect` (an index or an effect id).
+pub(crate) fn effect_target<'a>(it: &'a mut filmcraft_project::TrackItem, eff: &Value, node: Option<u64>) -> Option<&'a mut filmcraft_project::EffectInstance> {
+    match node {
+        Some(n) => it.grade.as_mut()?.corrector_mut(u32::try_from(n).ok()?),
+        None => match eff {
+            Value::Number(n) => it.effects.get_mut(n.as_u64().unwrap_or(0) as usize),
+            Value::String(sid) => it.effects.iter_mut().find(|e| &e.effect == sid),
+            _ => None,
+        },
+    }
 }
 
 pub(crate) fn json_to_param(template: &ParamValue, v: &Value) -> Option<ParamValue> {

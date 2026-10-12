@@ -58,10 +58,10 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         query("lut.list", "List LUTs", "{}", list),
         spec("lut.remove", "Remove LUT", &[], r#"{"id":str}"#, always, remove),
         query("lut.export", "Export LUT", r#"{"lut":"lib:<id>"|"builtin:<id>","path":str,"format":"cube"|"3dl"?}"#, export),
-        spec("lumetri.setInputLut", "Set Input LUT", &[], r#"{"clip":id?,"lut":"lib:<id>"|"builtin:<id>"|""?,"path":str?}"#, has_seq, |s, p| {
+        spec("lumetri.setInputLut", "Set Input LUT", &[], r#"{"clip":id?,"node":n?,"lut":"lib:<id>"|"builtin:<id>"|""?,"path":str?}"#, has_seq, |s, p| {
             set_lut(s, p, "input_lut")
         }),
-        spec("lumetri.setLook", "Set Creative Look", &[], r#"{"clip":id?,"lut":"lib:<id>"|"builtin:<id>"|""?,"path":str?}"#, has_seq, |s, p| {
+        spec("lumetri.setLook", "Set Creative Look", &[], r#"{"clip":id?,"node":n?,"lut":"lib:<id>"|"builtin:<id>"|""?,"path":str?}"#, has_seq, |s, p| {
             set_lut(s, p, "look_lut")
         }),
         spec(
@@ -76,7 +76,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "lumetri.setSection",
             "Toggle Lumetri Section",
             &[],
-            r#"{"clip":id?,"section":"basic"|"creative"|"curves"|"wheels"|"hsl"|"vignette","on":bool?}"#,
+            r#"{"clip":id?,"node":n?,"section":"basic"|"creative"|"curves"|"wheels"|"hsl"|"vignette","on":bool?}"#,
             has_seq,
             set_section,
         ),
@@ -163,10 +163,42 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// The target clip and the index of its Lumetri effect (applying Lumetri when missing).
-pub(crate) fn lumetri_clip(s: &mut Session, p: &Value, cmd: &str) -> Result<(ClipId, usize)> {
+/// Which Lumetri instance of a clip a command edits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LumetriTarget {
+    /// The clip's effect stack, by index.
+    Stack(usize),
+    /// A corrector node of the clip's node grade (`grade.*`).
+    Node(u32),
+}
+
+impl LumetriTarget {
+    pub(crate) fn get(self, it: &filmcraft_project::TrackItem) -> Option<&filmcraft_project::EffectInstance> {
+        match self {
+            LumetriTarget::Stack(i) => it.effects.get(i),
+            LumetriTarget::Node(n) => it.grade.as_ref()?.corrector(n),
+        }
+    }
+    pub(crate) fn get_mut(self, it: &mut filmcraft_project::TrackItem) -> Option<&mut filmcraft_project::EffectInstance> {
+        match self {
+            LumetriTarget::Stack(i) => it.effects.get_mut(i),
+            LumetriTarget::Node(n) => it.grade.as_mut()?.corrector_mut(n),
+        }
+    }
+}
+
+/// The clip and Lumetri instance a `lumetri.*` command works on: `node` names a corrector of the
+/// clip's node grade; otherwise the stack's Lumetri (added when the clip has none).
+pub(crate) fn lumetri_clip(s: &mut Session, p: &Value, cmd: &str) -> Result<(ClipId, LumetriTarget)> {
+    let node = p.get("node").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok());
     let seq = s.active_sequence().ok_or_else(|| bad(cmd, "no active sequence"))?;
     let video = |c: &ClipId| seq.find_item(*c).is_some_and(|(t, _)| seq.track(t).is_some_and(|t| t.kind == TrackKind::Video));
-    let has = |c: &ClipId| seq.find_item(*c).is_some_and(|(_, it)| it.effects.iter().any(|e| e.effect == "lumetri"));
+    let has = |c: &ClipId| {
+        seq.find_item(*c).is_some_and(|(_, it)| match node {
+            Some(n) => it.grade.as_ref().is_some_and(|g| g.corrector(n).is_some()),
+            None => it.effects.iter().any(|e| e.effect == "lumetri"),
+        })
+    };
     let clip = match clip_p(p, "clip") {
         Some(c) if video(&c) => c,
         Some(_) => return Err(bad(cmd, "not a video clip")),
@@ -175,20 +207,26 @@ pub(crate) fn lumetri_clip(s: &mut Session, p: &Value, cmd: &str) -> Result<(Cli
             sel.iter().copied().find(has).or(sel.first().copied()).ok_or_else(|| bad(cmd, "select a video clip"))?
         }
     };
+    if let Some(n) = node {
+        if !has(&clip) {
+            return Err(bad(cmd, format!("the clip has no corrector node {n}")));
+        }
+        return Ok((clip, LumetriTarget::Node(n)));
+    }
     if !has(&clip) {
         s.execute("effects.apply", json!({"clips": [clip.0], "effect": "lumetri"}))?;
     }
     let seq = s.active_sequence().ok_or_else(|| bad(cmd, "no active sequence"))?;
     let idx = seq.find_item(clip).and_then(|(_, it)| it.effects.iter().position(|e| e.effect == "lumetri")).ok_or_else(|| bad(cmd, "no Lumetri"))?;
-    Ok((clip, idx))
+    Ok((clip, LumetriTarget::Stack(idx)))
 }
 
 /// Set a Lumetri parameter (inserting it when an older project's instance lacks it).
-pub(crate) fn set_lumetri_param(s: &mut Session, clip: ClipId, idx: usize, param: &str, v: ParamValue, label: &str) -> Result<()> {
+pub(crate) fn set_lumetri_param(s: &mut Session, clip: ClipId, target: LumetriTarget, param: &str, v: ParamValue, label: &str) -> Result<()> {
     let param = param.to_string();
     s.edit_sequence(label, |q, _, _| {
         let (_, it) = q.find_item_mut(clip).ok_or(filmcraft_edit::EditError::NoItem(clip))?;
-        let e = it.effects.get_mut(idx).ok_or_else(|| bad("lumetri", "no Lumetri"))?;
+        let e = target.get_mut(it).ok_or_else(|| bad("lumetri", "no Lumetri"))?;
         e.params.entry(param.clone()).or_insert_with(|| filmcraft_project::Param::new(v.clone())).value = v.clone();
         Ok(())
     })?;
@@ -228,7 +266,7 @@ fn set_section(s: &mut Session, p: &Value) -> Result<Value> {
     let cur = s
         .active_sequence()
         .and_then(|q| q.find_item(clip))
-        .and_then(|(_, it)| it.effects.get(idx).and_then(|e| e.param(param)).and_then(|v| v.value.as_bool()))
+        .and_then(|(_, it)| idx.get(it).and_then(|e| e.param(param)).and_then(|v| v.value.as_bool()))
         .unwrap_or(param != "hsl_on");
     let v = bool_p(p, "on").unwrap_or(!cur);
     set_lumetri_param(s, clip, idx, param, ParamValue::Bool(v), "Lumetri Section")?;
@@ -449,11 +487,11 @@ fn apply_match(s: &mut Session, p: &Value) -> Result<Value> {
     if it.range().contains(reference_t) {
         return Err(bad("lumetri.applyMatch", "the reference frame is inside the clip being matched; pick a frame from another shot"));
     }
-    let base = it.effects[idx].clone();
+    let base = idx.get(it).cloned().ok_or_else(|| bad("lumetri.applyMatch", "no Lumetri"))?;
     // the current shot as Lumetri sees it: the clip with its Lumetri switched off
     let mut probe = (*s.project).clone();
-    if let Some((_, pi)) = probe.sequence_mut(seq_id).and_then(|q| q.find_item_mut(clip)) {
-        pi.effects[idx].enabled = false;
+    if let Some(e) = probe.sequence_mut(seq_id).and_then(|q| q.find_item_mut(clip)).and_then(|(_, pi)| idx.get_mut(pi)) {
+        e.enabled = false;
     }
     let provider = s.media.provider(s.project.clone(), s.services.clone());
     let opts = filmcraft_render::RenderOptions { scale: 0.25, working_output: true, ..Default::default() };
@@ -474,7 +512,7 @@ fn apply_match(s: &mut Session, p: &Value) -> Result<Value> {
     ];
     s.edit_sequence("Apply Match", |q, _, _| {
         let (_, it) = q.find_item_mut(clip).ok_or(filmcraft_edit::EditError::NoItem(clip))?;
-        let e = it.effects.get_mut(idx).ok_or_else(|| bad("lumetri.applyMatch", "no Lumetri"))?;
+        let e = idx.get_mut(it).ok_or_else(|| bad("lumetri.applyMatch", "no Lumetri"))?;
         for (k, v) in &values {
             let prm = e.params.entry(k.to_string()).or_insert_with(|| filmcraft_project::Param::new(v.clone()));
             prm.keyframes.clear();

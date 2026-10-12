@@ -276,7 +276,7 @@ fn clicking_outside_dismisses_without_export_and_dropdowns_stay_open() {
         click(&mut h, "exportFrame.depth.16");
         assert!(has(&h, "exportFrame.name"));
         assert_eq!(h.state().auto.elements.iter().find(|e| e.id == "exportFrame.depth").unwrap().label, "16 Bit");
-        click(&mut h, "header.mode.export");
+        click(&mut h, "page.deliver");
         assert!(!has(&h, "exportFrame.name"));
         assert_eq!(h.state().ui.mode, filmcraft_ui_egui::state::Mode::Export);
         assert_eq!(h.state().session.project.items.len(), count);

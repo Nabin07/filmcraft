@@ -173,6 +173,20 @@ pub enum Mode {
     Export,
 }
 
+/// The page bar's pages (Resolve-style workflow): each is a [`Mode`] plus a workspace
+/// ([`crate::page_bar`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Page {
+    Media,
+    Cut,
+    #[default]
+    Edit,
+    Color,
+    Fairlight,
+    Deliver,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TimelineView {
     /// Pixels per second (animated toward `target_pps`).
@@ -428,8 +442,14 @@ pub struct UiState {
     pub language: crate::i18n::Language,
     pub tool: Tool,
     pub mode: Mode,
+    /// The page bar's page (kept in step with `mode` and `workspace`).
+    #[serde(default)]
+    pub page: Page,
     pub workspace: String,
     pub dock: DockNode,
+    /// The node selected in the Color page's node graph (edited by the Lumetri panel).
+    #[serde(default)]
+    pub grade_node: Option<u32>,
     #[serde(default)]
     pub floating: Vec<crate::dock::Floating>,
     /// Focused panel (blue outline, receives shortcuts).
@@ -950,7 +970,9 @@ impl Default for UiState {
             language: crate::i18n::Language::default(),
             tool: Tool::Selection,
             mode: Mode::Edit,
+            page: Page::Edit,
             workspace: "Editing".into(),
+            grade_node: None,
             floating: vec![],
             dock: crate::dock::workspace("Editing"),
             focused: PanelKind::Timeline,

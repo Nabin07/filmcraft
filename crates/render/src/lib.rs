@@ -17,6 +17,7 @@ pub mod colorman;
 pub mod effects;
 pub mod flow;
 pub mod gpufx;
+pub mod grade;
 pub mod graphic_clip;
 pub mod graphics;
 pub mod image;
@@ -490,6 +491,9 @@ pub(crate) fn item_layer_ex(
                 return None;
             }
             mask::apply_effect(&mut layer, e, &cx);
+        }
+        if let Some(g) = &item.grade {
+            grade::apply(&mut layer, g, &cx);
         }
     }
     mask::apply_opacity_masks(&mut layer, item, mt, px_scale);

@@ -1,5 +1,5 @@
-//! The header bar (Premiere 26 layout, 38 pt): Home and Import / Edit / Export on the left, the
-//! document title centred, the workspace name and quick actions on the right. On macOS the menus
+//! The header bar (38 pt): Home on the left (the pages themselves are in the page bar along the
+//! bottom, [`crate::page_bar`]), the document title centred, the workspace name and quick actions on the right. On macOS the menus
 //! live in the native menu bar (set up by the app); elsewhere a compact in-window menu bar follows
 //! the mode tabs.
 
@@ -7,7 +7,7 @@ use egui::{Color32, Rect, Sense, Stroke, pos2, vec2};
 
 use crate::FilmcraftApp;
 use crate::icons::{self, Icon};
-use crate::state::Mode;
+use crate::state::Page;
 use crate::theme::Tokens;
 
 pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
@@ -33,27 +33,9 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
     }
     icons::paint(&p, home.shrink(5.0), Icon::Home, if hresp.hovered() { t.text } else { t.text_dim });
     if hresp.clicked() {
-        app.ui.mode = Mode::Import;
+        app.set_page(Page::Media);
     }
     x = home.max.x + 16.0;
-    // Mode tabs (14 pt; active = primary text with a 2 pt underline under the label)
-    for (m, label, shown) in [(Mode::Import, "Import", tl!("Import")), (Mode::Edit, "Edit", tl!("Edit")), (Mode::Export, "Export", tl!("Export"))] {
-        let active = app.ui.mode == m;
-        let galley = p.layout_no_wrap(shown.to_string(), Tokens::ui(14.0), if active { t.tab_text_active } else { t.tab_text });
-        let r = Rect::from_min_size(pos2(x - 6.0, rect.min.y + 6.0), vec2(galley.size().x + 12.0, rect.height() - 12.0));
-        let resp = ui.interact(r, egui::Id::new(("mode", label)), Sense::click());
-        app.auto.add(&format!("header.mode.{}", label.to_ascii_lowercase()), r, label);
-        let col = if active || resp.hovered() { t.tab_text_active } else { t.tab_text };
-        let gw = galley.size().x;
-        p.galley_with_override_text_color(pos2(x, rect.center().y - galley.size().y / 2.0), galley, col);
-        if active {
-            p.line_segment([pos2(x, rect.min.y + 29.0), pos2(x + gw, rect.min.y + 29.0)], Stroke::new(2.0, t.tab_text_active));
-        }
-        if resp.clicked() {
-            app.ui.mode = m;
-        }
-        x += gw + 24.0;
-    }
     let mut left_end = x;
     // In-window menus when there is no native menu bar.
     if app.ui.show_menu_bar {
@@ -91,7 +73,7 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         app.show_panel(crate::dock::PanelKind::Effects);
     }
     if btn(ui, Icon::Bell, "notifications", tl!("Progress"), app).clicked() {
-        app.ui.mode = Mode::Export;
+        app.set_page(Page::Deliver);
     }
     // Quick Export: a popup with File Name & Location, a preset list and Export (Premiere 26)
     let qx = rect.max.x - 14.0 - 4.0 * 38.0; // the fifth button from the right

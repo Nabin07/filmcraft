@@ -40,10 +40,12 @@ pub enum PanelKind {
     ReferenceMonitor,
     Timecode,
     ProjectNotes,
+    /// The Color page's node graph ([`crate::panels::node_graph`]).
+    NodeGraph,
 }
 
 impl PanelKind {
-    pub const ALL: [PanelKind; 28] = [
+    pub const ALL: [PanelKind; 29] = [
         PanelKind::Project,
         PanelKind::MediaBrowser,
         PanelKind::Libraries,
@@ -72,6 +74,7 @@ impl PanelKind {
         PanelKind::ReferenceMonitor,
         PanelKind::Timecode,
         PanelKind::ProjectNotes,
+        PanelKind::NodeGraph,
     ];
     pub fn title(self) -> &'static str {
         match self {
@@ -103,6 +106,7 @@ impl PanelKind {
             PanelKind::ReferenceMonitor => "Reference Monitor",
             PanelKind::Timecode => "Timecode",
             PanelKind::ProjectNotes => "Project Notes",
+            PanelKind::NodeGraph => "Nodes",
         }
     }
     pub fn id(self) -> String {
@@ -177,7 +181,7 @@ fn vsplit(size: SplitSize, a: DockNode, b: DockNode) -> DockNode {
     DockNode::Split { vertical: true, size, a: Box::new(a), b: Box::new(b) }
 }
 
-pub const WORKSPACES: [&str; 9] = ["Editing", "Assembly", "Color", "Effects", "Audio", "Captions and Graphics", "Learning", "Review", "All Panels"];
+pub const WORKSPACES: [&str; 10] = ["Editing", "Cut", "Assembly", "Color", "Effects", "Audio", "Captions and Graphics", "Learning", "Review", "All Panels"];
 
 /// The user's workspaces file, beside `preferences.json` in the data directory.
 pub const WORKSPACES_FILE: &str = "workspaces.json";
@@ -322,14 +326,26 @@ pub fn workspace(name: &str) -> DockNode {
             ),
             bottom_editing(),
         ),
-        "Color" => hsplit(
-            FixedB(340.0),
-            vsplit(
-                Ratio(0.58),
-                hsplit(Ratio(0.42), tabs(&[LumetriScopes, Source, EffectControls], 0), tabs(&[Program], 0)),
-                hsplit(Ratio(0.3), tabs(&[Project, Info, Markers, History], 0), bottom_editing()),
+        // Cut: a bin and a big viewer over a plain timeline, for fast assembly.
+        "Cut" => vsplit(
+            Ratio(0.55),
+            hsplit(Ratio(0.34), tabs(&[Project, MediaBrowser, Effects], 0), hsplit(Ratio(0.5), tabs(&[Source, EffectControls], 0), tabs(&[Program], 0))),
+            hsplit(FixedB(116.0), tabs(&[Timeline], 0), tabs(&[AudioMeters], 0)),
+        ),
+        // Color (Resolve-style page): bins | viewer | node graph on top, a clip strip (the timeline)
+        // across the middle, the corrector (Lumetri) and scopes along the bottom.
+        "Color" => vsplit(
+            Ratio(0.38),
+            hsplit(
+                Ratio(0.18),
+                tabs(&[Project, Info, Markers, History], 0),
+                hsplit(Ratio(0.52), tabs(&[Program, Source], 0), tabs(&[NodeGraph, Effects, EffectControls], 0)),
             ),
-            tabs(&[LumetriColor, Effects], 0),
+            vsplit(
+                FixedA(150.0),
+                hsplit(FixedB(116.0), tabs(&[Timeline], 0), tabs(&[AudioMeters], 0)),
+                hsplit(Ratio(0.66), tabs(&[LumetriColor], 0), tabs(&[LumetriScopes], 0)),
+            ),
         ),
         "Effects" => hsplit(
             FixedB(320.0),

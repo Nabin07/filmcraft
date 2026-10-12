@@ -3554,3 +3554,45 @@
 	Export the labels to a preset file…	将标签导出为预设文件…
 	Show the presets folder	显示预设文件夹
 	Delete this preset	删除此预设
+
+# Color page: the page bar and the node graph (resolve-ui fork)
+	(select a clip to grade)	（选择要调色的剪辑）
+	Add Branch	添加分支
+	Add Layer Node	添加图层节点
+	Add Parallel Node	添加并行节点
+	Add Serial Node Before	在前面添加串行节点
+	Add Serial Node	添加串行节点
+	Add a branch into the selected mixer	向所选混合器添加一个分支
+	Add a layer mixer with a new branch after the selected node	在所选节点之后添加带新分支的图层混合器
+	Add a parallel mixer with a new branch after the selected node	在所选节点之后添加带新分支的并行混合器
+	Add a serial node after the selected node	在所选节点之后添加串行节点
+	Auto Layout Nodes	自动排列节点
+	Blend: {mode}	混合：{mode}
+	Bypass / enable the selected node	旁路或启用所选节点
+	Bypass Node	旁路节点
+	Corrector	校色器
+	Delete Node	删除节点
+	Delete the selected node	删除所选节点
+	Deliver	交付
+	Enable Node	启用节点
+	Fairlight	Fairlight
+	Grade	调色
+	Lay the nodes out again	重新排列节点
+	Node {k} · {name}	节点 {k} · {name}
+	Nodes	节点
+	Pages	页面
+	Parallel	并行
+	Remove Node Grade	移除节点调色
+	Remove the node grade from the clip	从剪辑移除节点调色
+	Reset Node	重置节点
+	Start Node Grade	开始节点调色
+	Start node grade	开始节点调色
+	{name} has no node grade	{name} 没有节点调色
+	{name} · {n} nodes	{name} · {n} 个节点
+	Node Grade	节点调色
+	Connect Nodes	连接节点
+	Disconnect Input	断开输入
+	Enable / Disable Node	启用或禁用节点
+	Move Node	移动节点
+	Label Node	标记节点
+	Set Mixer	设置混合器

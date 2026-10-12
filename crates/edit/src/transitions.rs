@@ -240,6 +240,7 @@ mod tests {
             source_channels: Vec::new(),
             audio_stream: 0,
             graphic: None,
+            grade: None,
         }
     }
 

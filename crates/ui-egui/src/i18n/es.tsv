@@ -3576,3 +3576,47 @@
 	Export the labels to a preset file…	Exportar las etiquetas a un archivo de ajuste preestablecido…
 	Show the presets folder	Mostrar la carpeta de ajustes preestablecidos
 	Delete this preset	Eliminar este ajuste preestablecido
+
+# Color page: the page bar and the node graph (resolve-ui fork)
+	(select a clip to grade)	(selecciona un clip para etalonar)
+	Add Branch	Añadir rama
+	Add Layer Node	Añadir nodo de capa
+	Add Parallel Node	Añadir nodo paralelo
+	Add Serial Node Before	Añadir nodo en serie antes
+	Add Serial Node	Añadir nodo en serie
+	Add a branch into the selected mixer	Añade una rama al mezclador seleccionado
+	Add a layer mixer with a new branch after the selected node	Añade un mezclador de capas con una rama nueva tras el nodo seleccionado
+	Add a parallel mixer with a new branch after the selected node	Añade un mezclador paralelo con una rama nueva tras el nodo seleccionado
+	Add a serial node after the selected node	Añade un nodo en serie tras el nodo seleccionado
+	Auto Layout Nodes	Ordenar nodos automáticamente
+	Blend: {mode}	Fusión: {mode}
+	Bypass / enable the selected node	Omite o activa el nodo seleccionado
+	Bypass Node	Omitir nodo
+	Corrector	Corrector
+	Delete Node	Eliminar nodo
+	Delete the selected node	Elimina el nodo seleccionado
+	Deliver	Entregar
+	Enable Node	Activar nodo
+	Fairlight	Fairlight
+	Grade	Etalonaje
+	Lay the nodes out again	Vuelve a ordenar los nodos
+	Node {k} · {name}	Nodo {k} · {name}
+	Nodes	Nodos
+	Pages	Páginas
+	Parallel	Paralelo
+	Remove Node Grade	Quitar etalonaje por nodos
+	Remove the node grade from the clip	Quita el etalonaje por nodos del clip
+	Reset Node	Restablecer nodo
+	Start Node Grade	Iniciar etalonaje por nodos
+	Start node grade	Iniciar etalonaje por nodos
+	{name} has no node grade	{name} no tiene etalonaje por nodos
+	{name} · {n} nodes	{name} · {n} nodos
+	Node Grade	Etalonaje por nodos
+	Connect Nodes	Conectar nodos
+	Disconnect Input	Desconectar entrada
+	Enable / Disable Node	Activar o desactivar nodo
+	Move Node	Mover nodo
+	Label Node	Etiquetar nodo
+	Set Mixer	Ajustar mezclador
+	Create a subclip for each detected cut point	Crea un subclip por cada punto de corte detectado
+	Generate clip markers at each detected cut point	Genera marcadores de clip en cada punto de corte detectado

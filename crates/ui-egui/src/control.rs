@@ -145,6 +145,15 @@ pub fn handle(app: &mut FilmcraftApp, ctx: &egui::Context, req: &ControlRequest)
                     None => return err(format!("unknown workspace `{w}`")),
                 }
             }
+            if let Some(pg) = s("page") {
+                match crate::state::Page::from_name(pg) {
+                    Some(pg) => app.set_page(pg),
+                    None => return err(format!("unknown page `{pg}`")),
+                }
+            }
+            if let Some(n) = p.get("gradeNode") {
+                app.ui.grade_node = n.as_u64().and_then(|n| u32::try_from(n).ok());
+            }
             if let Some(m) = s("mode") {
                 app.ui.mode = match m.to_ascii_lowercase().as_str() {
                     "import" => Mode::Import,

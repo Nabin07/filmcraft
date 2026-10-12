@@ -34,16 +34,32 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         return;
     };
     let mut bui = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(vec2(12.0, 6.0))).id_salt("lumetri2"));
-    let Some(idx) = it.effects.iter().position(|e| e.effect == "lumetri") else {
+    // A clip with a node grade is edited node by node (the Color page's node graph picks the node);
+    // otherwise the panel edits the clip's stack Lumetri.
+    let node = super::node_graph::edited_node(app, &it);
+    let (idx, e) = match node {
+        Some(n) => (0, it.grade.as_ref().and_then(|g| g.corrector(n)).cloned()),
+        None => {
+            let idx = it.effects.iter().position(|e| e.effect == "lumetri");
+            (idx.unwrap_or(0), idx.and_then(|i| it.effects.get(i)).cloned())
+        }
+    };
+    let Some(e) = e else {
         bui.add_space(8.0);
         bui.label(egui::RichText::new(tlf!("Master · {name}", name = it.name)).color(t.text_dim));
         bui.add_space(8.0);
         if bui.button(tl!("Add Lumetri Color to clip")).clicked() {
             let _ = app.session.execute("effects.apply", json!({"clips": [clip.0], "effect": "lumetri"}));
         }
+        if bui.button(tl!("Start node grade")).clicked() {
+            match app.session.execute("grade.start", json!({"clip": clip.0})) {
+                Ok(v) => app.ui.grade_node = v["node"].as_u64().and_then(|n| u32::try_from(n).ok()),
+                Err(err) => app.ui.status = err.to_string(),
+            }
+        }
         return;
     };
-    let e = it.effects[idx].clone();
+    let node_enabled = node.and_then(|n| it.grade.as_ref()?.node(n)).is_none_or(|n| n.enabled);
     // HDR mode: the sequence's working space is Rec. 2100 PQ or HLG
     let hdr = app.session.active_sequence().is_some_and(|q| q.settings.color.working.is_hdr());
     let mut auto_rows: Vec<(String, Rect, &'static str)> = Vec::new();
@@ -54,182 +70,254 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
     // the fx toggle is laid out first so a long clip name is truncated instead of widening the panel
     bui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let fx = ui.add(egui::Button::new(egui::RichText::new("fx").italics().color(if e.enabled { t.text } else { t.text_faint })).frame(false));
+            let fx = ui
+                .add(egui::Button::new(egui::RichText::new("fx").italics().color(if e.enabled && node_enabled { t.text } else { t.text_faint })).frame(false));
             if fx.clicked() {
-                let _ = app.session.execute("effects.toggleEnabled", json!({"clip": clip.0, "index": idx}));
+                let r = match node {
+                    Some(n) => app.session.execute("grade.setEnabled", json!({"clip": clip.0, "node": n})),
+                    None => app.session.execute("effects.toggleEnabled", json!({"clip": clip.0, "index": idx})),
+                };
+                if let Err(err) = r {
+                    app.ui.status = err.to_string();
+                }
             }
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.add(egui::Label::new(egui::RichText::new(tlf!("Master · {name}", name = it.name)).color(t.text_dim)).truncate());
+                let title = match node.and_then(|n| it.grade.as_ref()?.number_of(n)) {
+                    Some(k) => tlf!("Node {k} · {name}", k = format!("{k:02}"), name = it.name),
+                    None => tlf!("Master · {name}", name = it.name),
+                };
+                ui.add(egui::Label::new(egui::RichText::new(title).color(t.text_dim)).truncate());
             });
         });
     });
     let set = |actions: &mut Actions, param: &str, v: Value| actions.push(json!({"clip": clip.0, "effect": idx, "param": param, "value": v}));
     let mut sections: Vec<&'static str> = Vec::new();
     let mut lut_actions: Vec<(&'static str, Value)> = Vec::new();
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(&mut bui, |ui| {
-        if open_section(ui, app, &e, "Basic Correction", "basic_on", "basic", &mut sections) {
-            lut_combo(ui, app, &e, "input_lut", tl!("Input LUT"), true, &mut lut_actions);
-            sub(ui, &t, tl!("Color"));
-            slider(ui, &e, mt, "temperature", tl!("Temperature"), Some(Gradient::Temp), &t, &mut actions, clip, idx);
-            slider(ui, &e, mt, "tint", tl!("Tint"), Some(Gradient::Tint), &t, &mut actions, clip, idx);
-            slider(ui, &e, mt, "saturation", tl!("Saturation"), None, &t, &mut actions, clip, idx);
-            sub(ui, &t, tl!("Light"));
-            for (id, label) in [
-                ("exposure", tl!("Exposure")),
-                ("contrast", tl!("Contrast")),
-                ("highlights", tl!("Highlights")),
-                ("shadows", tl!("Shadows")),
-                ("whites", tl!("Whites")),
-                ("blacks", tl!("Blacks")),
-            ] {
-                slider(ui, &e, mt, id, label, None, &t, &mut actions, clip, idx);
+    let mut basic_open = false;
+    // The sections as macros, so the same code lays out in one column (a tall panel) or in three
+    // (the Color page's wide, short corrector strip); each expansion borrows the panel's locals in turn.
+    macro_rules! basic {
+        ($ui:expr) => {{
+            let ui: &mut egui::Ui = $ui;
+            basic_open = open_section(ui, app, &e, "Basic Correction", "basic_on", "basic", &mut sections);
+            if basic_open {
+                lut_combo(ui, app, &e, "input_lut", tl!("Input LUT"), true, &mut lut_actions);
+                sub(ui, &t, tl!("Color"));
+                slider(ui, &e, mt, "temperature", tl!("Temperature"), Some(Gradient::Temp), &t, &mut actions, clip, idx);
+                slider(ui, &e, mt, "tint", tl!("Tint"), Some(Gradient::Tint), &t, &mut actions, clip, idx);
+                slider(ui, &e, mt, "saturation", tl!("Saturation"), None, &t, &mut actions, clip, idx);
             }
-            if hdr {
-                sub(ui, &t, tl!("HDR"));
-                for (id, label) in [("hdr_white", tl!("HDR White")), ("hdr_specular", tl!("HDR Specular"))] {
-                    let r = slider(ui, &e, mt, id, label, None, &t, &mut actions, clip, idx);
-                    auto_rows.push((format!("lumetri.param.{id}"), r, label));
-                }
-            }
-        }
-        if open_section(ui, app, &e, "Creative", "creative_on", "creative", &mut sections) {
-            let look = match e.param("look").map(|p| &p.value) {
-                Some(ParamValue::Choice(c)) => *c as usize,
-                _ => 0,
-            };
-            let opts = filmcraft_project::find_effect("lumetri")
-                .and_then(|d| d.param("look"))
-                .and_then(|p| if let filmcraft_project::ParamKind::Choice(o) = p.kind { Some(o) } else { None })
-                .unwrap_or(&[]);
-            ui.horizontal(|ui| {
-                ui.add_sized(vec2(110.0, 20.0), egui::Label::new(egui::RichText::new(tl!("Look")).color(t.text_dim)));
-                let mut sel = look;
-                egui::ComboBox::from_id_salt("lumetri-look")
-                    .selected_text(opts.get(look).map_or(tl!("None"), |o| crate::i18n::t(o)))
-                    .width((ui.available_width() - 40.0).max(60.0))
-                    .show_ui(ui, |ui| {
-                        for (i, o) in opts.iter().enumerate() {
-                            if ui.selectable_value(&mut sel, i, crate::i18n::t(o)).changed() {
-                                set(&mut actions, "look", json!(i));
-                            }
-                        }
-                    });
-            });
-            lut_combo(ui, app, &e, "look_lut", tl!("Look LUT"), false, &mut lut_actions);
-            slider(ui, &e, mt, "look_intensity", tl!("Intensity"), None, &t, &mut actions, clip, idx);
-            sub(ui, &t, tl!("Adjustments"));
-            for (id, label) in
-                [("faded_film", tl!("Faded Film")), ("sharpen", tl!("Sharpen")), ("vibrance", tl!("Vibrance")), ("creative_sat", tl!("Saturation"))]
-            {
-                slider(ui, &e, mt, id, label, None, &t, &mut actions, clip, idx);
-            }
-        }
-        if open_section(ui, app, &e, "Curves", "curves_on", "curves", &mut sections) {
-            sub(ui, &t, tl!("RGB Curves"));
-            let key = egui::Id::new("lumetri-curve-channel");
-            let mut ch: usize = ui.data(|d| d.get_temp(key)).unwrap_or(0);
-            ui.horizontal(|ui| {
-                for (i, c) in
-                    [Color32::WHITE, Color32::from_rgb(230, 70, 70), Color32::from_rgb(80, 200, 90), Color32::from_rgb(80, 130, 250)].iter().enumerate()
-                {
-                    let (r, resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
-                    ui.painter().circle_filled(r.center(), 6.0, *c);
-                    if ch == i {
-                        ui.painter().circle_stroke(r.center(), 8.5, Stroke::new(1.5, t.hot_text));
-                    }
-                    if resp.clicked() {
-                        ch = i;
-                    }
-                }
-            });
-            ui.data_mut(|d| d.insert_temp(key, ch));
-            let (id, col) = [
-                ("curve_luma", Color32::WHITE),
-                ("curve_red", Color32::from_rgb(230, 70, 70)),
-                ("curve_green", Color32::from_rgb(80, 200, 90)),
-                ("curve_blue", Color32::from_rgb(80, 130, 250)),
-            ][ch];
-            curve_editor(ui, &e, id, false, col, &t, &mut actions, clip, idx);
-            if hdr {
-                let r = slider(ui, &e, mt, "curves_hdr_range", tl!("HDR Range"), None, &t, &mut actions, clip, idx);
-                auto_rows.push(("lumetri.param.curves_hdr_range".into(), r, "HDR Range"));
-            }
-            sub(ui, &t, tl!("Hue Saturation Curves"));
-            for (id, label) in [
-                ("hue_vs_sat", tl!("Hue vs Sat")),
-                ("hue_vs_hue", tl!("Hue vs Hue")),
-                ("hue_vs_luma", tl!("Hue vs Luma")),
-                ("luma_vs_sat", tl!("Luma vs Sat")),
-                ("sat_vs_sat", tl!("Sat vs Sat")),
-            ] {
-                ui.label(egui::RichText::new(label).color(t.text_dim));
-                curve_editor(ui, &e, id, true, Color32::WHITE, &t, &mut actions, clip, idx);
-            }
-        }
-        if open_section(ui, app, &e, "Color Wheels & Match", "wheels_on", "wheels", &mut sections) {
-            let w = ((ui.available_width() - 24.0) / 3.0).min(120.0);
-            ui.horizontal(|ui| {
-                for (id, lid, label) in [
-                    ("wheel_shadows", "wheel_shadows_l", tl!("Shadows")),
-                    ("wheel_midtones", "wheel_midtones_l", tl!("Midtones")),
-                    ("wheel_highlights", "wheel_highlights_l", tl!("Highlights")),
+        }};
+    }
+    macro_rules! light {
+        ($ui:expr) => {{
+            let ui: &mut egui::Ui = $ui;
+            if basic_open {
+                sub(ui, &t, tl!("Light"));
+                for (id, label) in [
+                    ("exposure", tl!("Exposure")),
+                    ("contrast", tl!("Contrast")),
+                    ("highlights", tl!("Highlights")),
+                    ("shadows", tl!("Shadows")),
+                    ("whites", tl!("Whites")),
+                    ("blacks", tl!("Blacks")),
                 ] {
-                    ui.vertical(|ui| {
-                        ui.label(egui::RichText::new(label).color(t.text_dim));
-                        color_wheel(ui, &e, mt, id, lid, w, &t, &mut actions, clip, idx);
-                    });
+                    slider(ui, &e, mt, id, label, None, &t, &mut actions, clip, idx);
                 }
-            });
-            match_controls(ui, app, &mut lut_actions);
-        }
-        if open_section(ui, app, &e, "HSL Secondary", "hsl_on", "hsl", &mut sections) {
-            sub(ui, &t, tl!("Key"));
-            slider(ui, &e, mt, "hsl_hue", tl!("Hue"), Some(Gradient::Hue), &t, &mut actions, clip, idx);
-            for (id, label) in [
-                ("hsl_hue_range", tl!("Hue Range")),
-                ("hsl_sat_min", tl!("Saturation Min")),
-                ("hsl_luma_min", tl!("Luma Min")),
-                ("hsl_luma_max", tl!("Luma Max")),
-                ("hsl_soft", tl!("Soften")),
-            ] {
-                slider(ui, &e, mt, id, label, None, &t, &mut actions, clip, idx);
+                if hdr {
+                    sub(ui, &t, tl!("HDR"));
+                    for (id, label) in [("hdr_white", tl!("HDR White")), ("hdr_specular", tl!("HDR Specular"))] {
+                        let r = slider(ui, &e, mt, id, label, None, &t, &mut actions, clip, idx);
+                        auto_rows.push((format!("lumetri.param.{id}"), r, label));
+                    }
+                }
             }
-            let mask = match e.param("hsl_show_mask").map(|p| &p.value) {
-                Some(ParamValue::Choice(c)) => *c as usize,
-                _ => 0,
-            };
-            ui.horizontal(|ui| {
-                ui.add_sized(vec2(110.0, 20.0), egui::Label::new(egui::RichText::new(tl!("Show Mask")).color(t.text_dim)));
-                let mut sel = mask;
-                let modes = [tl!("Off"), tl!("Color/Gray"), tl!("Color/Black"), tl!("White/Black")];
-                egui::ComboBox::from_id_salt("hsl-mask").selected_text(modes[mask.min(3)]).show_ui(ui, |ui| {
-                    for (i, o) in modes.iter().enumerate() {
-                        if ui.selectable_value(&mut sel, i, *o).changed() {
-                            set(&mut actions, "hsl_show_mask", json!(i));
+        }};
+    }
+    macro_rules! creative {
+        ($ui:expr) => {{
+            let ui: &mut egui::Ui = $ui;
+            if open_section(ui, app, &e, "Creative", "creative_on", "creative", &mut sections) {
+                let look = match e.param("look").map(|p| &p.value) {
+                    Some(ParamValue::Choice(c)) => *c as usize,
+                    _ => 0,
+                };
+                let opts = filmcraft_project::find_effect("lumetri")
+                    .and_then(|d| d.param("look"))
+                    .and_then(|p| if let filmcraft_project::ParamKind::Choice(o) = p.kind { Some(o) } else { None })
+                    .unwrap_or(&[]);
+                ui.horizontal(|ui| {
+                    ui.add_sized(vec2(110.0, 20.0), egui::Label::new(egui::RichText::new(tl!("Look")).color(t.text_dim)));
+                    let mut sel = look;
+                    egui::ComboBox::from_id_salt("lumetri-look")
+                        .selected_text(opts.get(look).map_or(tl!("None"), |o| crate::i18n::t(o)))
+                        .width((ui.available_width() - 40.0).max(60.0))
+                        .show_ui(ui, |ui| {
+                            for (i, o) in opts.iter().enumerate() {
+                                if ui.selectable_value(&mut sel, i, crate::i18n::t(o)).changed() {
+                                    set(&mut actions, "look", json!(i));
+                                }
+                            }
+                        });
+                });
+                lut_combo(ui, app, &e, "look_lut", tl!("Look LUT"), false, &mut lut_actions);
+                slider(ui, &e, mt, "look_intensity", tl!("Intensity"), None, &t, &mut actions, clip, idx);
+                sub(ui, &t, tl!("Adjustments"));
+                for (id, label) in
+                    [("faded_film", tl!("Faded Film")), ("sharpen", tl!("Sharpen")), ("vibrance", tl!("Vibrance")), ("creative_sat", tl!("Saturation"))]
+                {
+                    slider(ui, &e, mt, id, label, None, &t, &mut actions, clip, idx);
+                }
+            }
+        }};
+    }
+    macro_rules! curves {
+        ($ui:expr) => {{
+            let ui: &mut egui::Ui = $ui;
+            if open_section(ui, app, &e, "Curves", "curves_on", "curves", &mut sections) {
+                sub(ui, &t, tl!("RGB Curves"));
+                let key = egui::Id::new("lumetri-curve-channel");
+                let mut ch: usize = ui.data(|d| d.get_temp(key)).unwrap_or(0);
+                ui.horizontal(|ui| {
+                    for (i, c) in
+                        [Color32::WHITE, Color32::from_rgb(230, 70, 70), Color32::from_rgb(80, 200, 90), Color32::from_rgb(80, 130, 250)].iter().enumerate()
+                    {
+                        let (r, resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
+                        ui.painter().circle_filled(r.center(), 6.0, *c);
+                        if ch == i {
+                            ui.painter().circle_stroke(r.center(), 8.5, Stroke::new(1.5, t.hot_text));
+                        }
+                        if resp.clicked() {
+                            ch = i;
                         }
                     }
                 });
+                ui.data_mut(|d| d.insert_temp(key, ch));
+                let (id, col) = [
+                    ("curve_luma", Color32::WHITE),
+                    ("curve_red", Color32::from_rgb(230, 70, 70)),
+                    ("curve_green", Color32::from_rgb(80, 200, 90)),
+                    ("curve_blue", Color32::from_rgb(80, 130, 250)),
+                ][ch];
+                curve_editor(ui, &e, id, false, col, &t, &mut actions, clip, idx);
+                if hdr {
+                    let r = slider(ui, &e, mt, "curves_hdr_range", tl!("HDR Range"), None, &t, &mut actions, clip, idx);
+                    auto_rows.push(("lumetri.param.curves_hdr_range".into(), r, "HDR Range"));
+                }
+                sub(ui, &t, tl!("Hue Saturation Curves"));
+                for (id, label) in [
+                    ("hue_vs_sat", tl!("Hue vs Sat")),
+                    ("hue_vs_hue", tl!("Hue vs Hue")),
+                    ("hue_vs_luma", tl!("Hue vs Luma")),
+                    ("luma_vs_sat", tl!("Luma vs Sat")),
+                    ("sat_vs_sat", tl!("Sat vs Sat")),
+                ] {
+                    ui.label(egui::RichText::new(label).color(t.text_dim));
+                    curve_editor(ui, &e, id, true, Color32::WHITE, &t, &mut actions, clip, idx);
+                }
+            }
+        }};
+    }
+    macro_rules! wheels {
+        ($ui:expr) => {{
+            let ui: &mut egui::Ui = $ui;
+            if open_section(ui, app, &e, "Color Wheels & Match", "wheels_on", "wheels", &mut sections) {
+                let w = ((ui.available_width() - 24.0) / 3.0).min(120.0);
+                ui.horizontal(|ui| {
+                    for (id, lid, label) in [
+                        ("wheel_shadows", "wheel_shadows_l", tl!("Shadows")),
+                        ("wheel_midtones", "wheel_midtones_l", tl!("Midtones")),
+                        ("wheel_highlights", "wheel_highlights_l", tl!("Highlights")),
+                    ] {
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new(label).color(t.text_dim));
+                            color_wheel(ui, &e, mt, id, lid, w, &t, &mut actions, clip, idx);
+                        });
+                    }
+                });
+                match_controls(ui, app, &mut lut_actions);
+            }
+        }};
+    }
+    macro_rules! hsl {
+        ($ui:expr) => {{
+            let ui: &mut egui::Ui = $ui;
+            if open_section(ui, app, &e, "HSL Secondary", "hsl_on", "hsl", &mut sections) {
+                sub(ui, &t, tl!("Key"));
+                slider(ui, &e, mt, "hsl_hue", tl!("Hue"), Some(Gradient::Hue), &t, &mut actions, clip, idx);
+                for (id, label) in [
+                    ("hsl_hue_range", tl!("Hue Range")),
+                    ("hsl_sat_min", tl!("Saturation Min")),
+                    ("hsl_luma_min", tl!("Luma Min")),
+                    ("hsl_luma_max", tl!("Luma Max")),
+                    ("hsl_soft", tl!("Soften")),
+                ] {
+                    slider(ui, &e, mt, id, label, None, &t, &mut actions, clip, idx);
+                }
+                let mask = match e.param("hsl_show_mask").map(|p| &p.value) {
+                    Some(ParamValue::Choice(c)) => *c as usize,
+                    _ => 0,
+                };
+                ui.horizontal(|ui| {
+                    ui.add_sized(vec2(110.0, 20.0), egui::Label::new(egui::RichText::new(tl!("Show Mask")).color(t.text_dim)));
+                    let mut sel = mask;
+                    let modes = [tl!("Off"), tl!("Color/Gray"), tl!("Color/Black"), tl!("White/Black")];
+                    egui::ComboBox::from_id_salt("hsl-mask").selected_text(modes[mask.min(3)]).show_ui(ui, |ui| {
+                        for (i, o) in modes.iter().enumerate() {
+                            if ui.selectable_value(&mut sel, i, *o).changed() {
+                                set(&mut actions, "hsl_show_mask", json!(i));
+                            }
+                        }
+                    });
+                });
+                sub(ui, &t, tl!("Refine"));
+                for (id, label) in [("hsl_denoise", tl!("Denoise")), ("hsl_blur", tl!("Blur"))] {
+                    let r = slider(ui, &e, mt, id, label, None, &t, &mut actions, clip, idx);
+                    auto_rows.push((format!("lumetri.param.{id}"), r, label));
+                }
+                sub(ui, &t, tl!("Correction"));
+                slider(ui, &e, mt, "hsl_temp", tl!("Temperature"), Some(Gradient::Temp), &t, &mut actions, clip, idx);
+                slider(ui, &e, mt, "hsl_tint", tl!("Tint"), Some(Gradient::Tint), &t, &mut actions, clip, idx);
+                slider(ui, &e, mt, "hsl_sat", tl!("Saturation"), None, &t, &mut actions, clip, idx);
+                slider(ui, &e, mt, "hsl_hue_shift", tl!("Hue Shift"), Some(Gradient::Hue), &t, &mut actions, clip, idx);
+            }
+        }};
+    }
+    macro_rules! vignette {
+        ($ui:expr) => {{
+            let ui: &mut egui::Ui = $ui;
+            if open_section(ui, app, &e, "Vignette", "vignette_on", "vignette", &mut sections) {
+                for (id, label) in [
+                    ("vignette_amount", tl!("Amount")),
+                    ("vignette_midpoint", tl!("Midpoint")),
+                    ("vignette_roundness", tl!("Roundness")),
+                    ("vignette_feather", tl!("Feather")),
+                ] {
+                    slider(ui, &e, mt, id, label, None, &t, &mut actions, clip, idx);
+                }
+            }
+        }};
+    }
+    let wide = rect.width() > 900.0;
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(&mut bui, |ui| {
+        if wide {
+            ui.columns(3, |cols| {
+                basic!(&mut cols[0]);
+                creative!(&mut cols[0]);
+                light!(&mut cols[1]);
+                curves!(&mut cols[1]);
+                wheels!(&mut cols[2]);
+                hsl!(&mut cols[2]);
+                vignette!(&mut cols[2]);
             });
-            sub(ui, &t, tl!("Refine"));
-            for (id, label) in [("hsl_denoise", tl!("Denoise")), ("hsl_blur", tl!("Blur"))] {
-                let r = slider(ui, &e, mt, id, label, None, &t, &mut actions, clip, idx);
-                auto_rows.push((format!("lumetri.param.{id}"), r, label));
-            }
-            sub(ui, &t, tl!("Correction"));
-            slider(ui, &e, mt, "hsl_temp", tl!("Temperature"), Some(Gradient::Temp), &t, &mut actions, clip, idx);
-            slider(ui, &e, mt, "hsl_tint", tl!("Tint"), Some(Gradient::Tint), &t, &mut actions, clip, idx);
-            slider(ui, &e, mt, "hsl_sat", tl!("Saturation"), None, &t, &mut actions, clip, idx);
-            slider(ui, &e, mt, "hsl_hue_shift", tl!("Hue Shift"), Some(Gradient::Hue), &t, &mut actions, clip, idx);
-        }
-        if open_section(ui, app, &e, "Vignette", "vignette_on", "vignette", &mut sections) {
-            for (id, label) in [
-                ("vignette_amount", tl!("Amount")),
-                ("vignette_midpoint", tl!("Midpoint")),
-                ("vignette_roundness", tl!("Roundness")),
-                ("vignette_feather", tl!("Feather")),
-            ] {
-                slider(ui, &e, mt, id, label, None, &t, &mut actions, clip, idx);
-            }
+        } else {
+            basic!(ui);
+            light!(ui);
+            creative!(ui);
+            curves!(ui);
+            wheels!(ui);
+            hsl!(ui);
+            vignette!(ui);
         }
         ui.add_space(20.0);
     });
@@ -238,10 +326,19 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
             app.auto.add(&id, r, label);
         }
     }
-    // a dragged value is one undo step, as in Effect Controls
+    // a dragged value is one undo step, as in Effect Controls; a node grade's parameters address the node
+    if let Some(n) = node {
+        for a in &mut actions {
+            a["node"] = json!(n);
+        }
+    }
     crate::panels::effect_controls::run(app, ui.ctx(), actions.into_iter().map(|a| ("effects.setParam".to_string(), a)).collect());
     for sec in sections {
-        if let Err(err) = app.session.execute("lumetri.setSection", json!({"clip": clip.0, "section": sec})) {
+        let mut p = json!({"clip": clip.0, "section": sec});
+        if let Some(n) = node {
+            p["node"] = json!(n);
+        }
+        if let Err(err) = app.session.execute("lumetri.setSection", p) {
             app.ui.status = err.to_string();
         }
     }
@@ -259,6 +356,9 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
             p = json!({"path": path});
         }
         p["clip"] = json!(clip.0);
+        if let Some(n) = node {
+            p["node"] = json!(n);
+        }
         if let Err(err) = app.session.execute(cmd, p) {
             app.ui.status = err.to_string();
         }

@@ -188,6 +188,17 @@ fn gpu_chain<'a>(project: &Project, item: &'a TrackItem, opts: RenderOptions) ->
         }
         chain.push(e);
     }
+    // a node grade runs on the GPU only as one serial chain of correctors (mixers need the CPU)
+    if let Some(g) = &item.grade
+        && g.is_active()
+    {
+        let serial = g.serial_chain()?;
+        if serial.iter().any(|e| e.masks.iter().any(|m| m.mode != filmcraft_project::MaskMode::None) || !crate::gpufx::GPU_EFFECTS.contains(&e.effect.as_str()))
+        {
+            return None;
+        }
+        chain.extend(serial);
+    }
     Some(chain)
 }
 

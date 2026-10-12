@@ -105,7 +105,14 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     uic!("view.theme.medium", "Dark", ["View", "Appearance"], None),
     uic!("view.theme.light", "Light", ["View", "Appearance"], None),
     uic!("view.appearanceMode.next", "Next Appearance Mode", ["View", "Appearance"], None),
+    uic!("window.page.media", "Media", ["Window", "Pages"], None),
+    uic!("window.page.cut", "Cut", ["Window", "Pages"], None),
+    uic!("window.page.edit", "Edit", ["Window", "Pages"], None),
+    uic!("window.page.color", "Color", ["Window", "Pages"], None),
+    uic!("window.page.fairlight", "Fairlight", ["Window", "Pages"], None),
+    uic!("window.page.deliver", "Deliver", ["Window", "Pages"], None),
     uic!("window.workspace.editing", "Editing", ["Window", "Workspaces"], Some("Alt+Shift+1")),
+    uic!("window.workspace.cut", "Cut", ["Window", "Workspaces"], None),
     uic!("window.workspace.assembly", "Assembly", ["Window", "Workspaces"], Some("Alt+Shift+2")),
     uic!("window.workspace.color", "Color", ["Window", "Workspaces"], Some("Alt+Shift+3")),
     uic!("window.workspace.effects", "Effects", ["Window", "Workspaces"], Some("Alt+Shift+4")),
@@ -248,6 +255,11 @@ pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut params:
         let p = PanelKind::from_name(rest).ok_or_else(|| format!("unknown panel `{rest}`"))?;
         app.show_panel(p);
         return Ok(Value::Null);
+    }
+    if let Some(rest) = id.strip_prefix("window.page.") {
+        let page = crate::state::Page::from_name(rest).ok_or_else(|| format!("unknown page `{rest}`"))?;
+        app.set_page(page);
+        return Ok(json!({"page": page.slug()}));
     }
     if let Some(r) = crate::panels::workspaces::route(app, id, &params) {
         return r;
@@ -407,7 +419,7 @@ pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut params:
             return Ok(Value::Null);
         }
         "mode.import" => {
-            app.ui.mode = Mode::Import;
+            app.set_page(crate::state::Page::Media);
             return Ok(Value::Null);
         }
         "mode.edit" => {
@@ -415,7 +427,7 @@ pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut params:
             return Ok(Value::Null);
         }
         "mode.export" => {
-            app.ui.mode = Mode::Export;
+            app.set_page(crate::state::Page::Deliver);
             return Ok(Value::Null);
         }
         "app.about" => {

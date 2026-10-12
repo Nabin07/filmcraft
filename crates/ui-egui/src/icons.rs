@@ -86,6 +86,10 @@ pub enum Icon {
     /// Community chat (the ArtCraft Discord): a speech bubble with three dots. Our own drawing,
     /// not the Discord logo.
     Chat,
+    /// A colour wheel (the Color page).
+    ColorWheel,
+    /// Three joined boxes (the node graph).
+    Nodes,
     /// Website: a globe.
     Globe,
     /// Source code (GitHub repository): angle brackets and a slash.
@@ -575,6 +579,20 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             pen.line(&[(13.5, 10.0), (13.5, 13.5), (10.0, 13.5)]);
             pen.line(&[(6.0, 13.5), (2.5, 13.5), (2.5, 10.0)]);
         }
+        ColorWheel => {
+            pen.circle(8.0, 8.0, 6.0);
+            pen.circle(8.0, 8.0, 2.2);
+            pen.line(&[(8.0, 2.0), (8.0, 5.8)]);
+            pen.line(&[(2.8, 11.0), (6.1, 9.1)]);
+            pen.line(&[(13.2, 11.0), (9.9, 9.1)]);
+        }
+        Nodes => {
+            pen.rect(1.5, 5.5, 5.5, 10.5);
+            pen.rect(10.5, 2.0, 14.5, 7.0);
+            pen.rect(10.5, 9.0, 14.5, 14.0);
+            pen.line(&[(5.5, 8.0), (8.0, 8.0), (8.0, 4.5), (10.5, 4.5)]);
+            pen.line(&[(8.0, 8.0), (8.0, 11.5), (10.5, 11.5)]);
+        }
         Export => {
             pen.line(&[(8.0, 10.0), (8.0, 2.0)]);
             pen.line(&[(5.0, 5.0), (8.0, 2.0), (11.0, 5.0)]);
@@ -883,6 +901,8 @@ mod tests {
         Redo,
         Bell,
         Chat,
+        ColorWheel,
+        Nodes,
         Globe,
         Code,
         Sparkle,

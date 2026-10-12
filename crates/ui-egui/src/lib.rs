@@ -45,6 +45,7 @@ pub mod i18n;
 pub mod icons;
 pub mod links;
 pub mod menus;
+pub mod page_bar;
 pub mod panels;
 pub mod perf;
 #[cfg(not(target_arch = "wasm32"))]
@@ -1708,11 +1709,17 @@ impl FilmcraftApp {
             header::show(self, ui, header);
         }
         let status_h = if self.ui.show_status_bar { 20.0 } else { 0.0 };
-        let body = egui::Rect::from_min_max(egui::pos2(full.min.x + 1.0, header.max.y + 1.0), egui::pos2(full.max.x - 1.0, full.max.y - status_h - 2.0));
+        // the page bar sits above the status bar (hidden with the header, for embedding hosts)
+        let page_h = if self.ui.show_header { page_bar::HEIGHT } else { 0.0 };
+        let page_rect = egui::Rect::from_min_max(egui::pos2(full.min.x, full.max.y - status_h - page_h), egui::pos2(full.max.x, full.max.y - status_h));
+        let body = egui::Rect::from_min_max(egui::pos2(full.min.x + 1.0, header.max.y + 1.0), egui::pos2(full.max.x - 1.0, page_rect.min.y - 2.0));
         match self.ui.mode {
             state::Mode::Edit => self.dock_area(ui, body),
             state::Mode::Import => panels::import_mode::show(self, ui, body),
             state::Mode::Export => panels::export_mode::show(self, ui, body),
+        }
+        if self.ui.show_header {
+            page_bar::show(self, ui, page_rect);
         }
         // the Timeline has had its chance to place a file drop this frame; anything left stays a bin import
         self.pending_timeline_drop = None;

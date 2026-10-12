@@ -19,6 +19,7 @@ pub mod commands;
 pub mod demo;
 pub mod essential_sound;
 pub mod export_tools;
+pub mod grade;
 pub mod graphic_templates;
 pub mod graphics;
 pub mod interchange;
@@ -1154,6 +1155,8 @@ mod export_tests;
 mod file_tests;
 #[cfg(test)]
 mod gap_selection_tests;
+#[cfg(test)]
+mod grade_tests;
 #[cfg(test)]
 mod image_sequence_tests;
 #[cfg(test)]

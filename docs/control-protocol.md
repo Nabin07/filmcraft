@@ -30,6 +30,7 @@ Methods (handlers in `crates/ui-egui/src/control.rs`):
 | `ui.inspect` | – | UI state (tool, workspace, dock, timeline view, playback, fps…) |
 | `ui.elements` | `{prefix?}` | every on-screen interactive element: id, label, rect |
 | `ui.set` | `{tool, workspace, mode, theme, focused, playbackRes, timeline:{pps,scroll,fit}, program:{…}, source:{…}, clipDialog:{param: value}, menuDialog:{param: value}, panels:{scopes, timecode, reference, events, progress}, export:{…}, keyframeSelection:[…]}` | `keyframeSelection` replaces the Effect Controls keyframe selection (`[{clip, effect, param, mask?, time}]`, `time` in media ticks; read back as `ui.inspect` → `ui.keyframe_selection`; a click on a lane keyframe selects just that one); `program` / `source` merge fields into the monitor view state (`res`, `paused_res`, `high_quality`, `display`, `zoom`, `pan`, `show_rulers`, `show_guides`, `lock_guides`, `snap`, `guides`, `compare_ref`, …; see [monitors.md](monitors.md)); `clipDialog` sets fields of the open Edit / Clip / File dialog (Paste Attributes, Make Subclip, Frame Hold Options, …); `menuDialog` those of the M3.11 dialogs (Find, Create Search Bin, Project Settings, Scene Edit Detection, Simplify Sequence, Automate to Sequence…; see `panels::menu_dialogs`); `panels` merges into the panel settings (`ui.inspect` → `ui.panels`; see `panels::panel_state`): Lumetri Scopes `{shown: ["vectorscopeYuv"|"vectorscopeHls"|"histogram"|"parade"|"waveform"], waveformType, paradeType, colorSpace, brightness, scale, clamp, targets}`, Timecode `{rows: [{source, mode, display}], showName}`, Reference Monitor `{ganged, time, display: "composite"|"scopes", scopes}`, Events `{level, selected}`, Progress `{showFinished}` `export` deep-merges into Export mode state (`preset` — applied first —, `settings` (ExportSettings JSON), `fileName`, `location`, `range`, `customStart`, `customEnd`, `openSections`, `manager` (Preset Manager: `query`, `favoritesOnly`, `selected`, `saveName`), `quickOpen`, `quickPath`, `quickPreset`); `program` / `source` merge fields into the monitor view state (`res`, `paused_res`, `high_quality`, `display`, `zoom`, `pan`, `show_rulers`, `show_guides`, `lock_guides`, `snap`, `guides`, `compare_ref`, …; see [monitors.md](monitors.md)); `clipDialog` sets fields of the open Edit / Clip / File dialog (Paste Attributes, Make Subclip, Frame Hold Options, …); `menuDialog` those of the M3.11 dialogs (Find, Create Search Bin, Project Settings, Scene Edit Detection, Simplify Sequence, Automate to Sequence…; see `panels::menu_dialogs`); `projectPanel` merges into the Project panel's view state (`bin` shown in place, `tabs` (bins in a tab or window: `{bin, floating, view, iconSize, nav}`), `activeTab`, `selectedBin`, `rename: {item|bin, text}`, `dialog` (`{"metadataDisplay": {columns, filter}}`, `{"savePresetAs": {name}}`, `{"managePresets": {selected, name}}`, `{"freeformOptions": {options}}`, `{"saveArrangement": {name, bin}}`)); `mediaBrowser` into the Media Browser's (`expanded`, `pathEdit`, `editColumns`, `treeWidth`). View settings, columns and presets are engine commands (`project.view.set`, `project.columns.set`, `project.viewPreset.*`, `mediaBrowser.settings`) |
+| `ui.set` (pages) | `{page: "media"|"cut"|"edit"|"color"|"fairlight"|"deliver", gradeNode: n?}` | the page bar's page (a mode plus a workspace: Media = Import, Cut / Edit / Color / Fairlight = the Cut / Editing / Color / Audio workspaces, Deliver = Export; also the commands `window.page.<page>`); `gradeNode` selects the node the Color page's Lumetri panel edits (`ui.inspect` → `ui.page`, `ui.grade_node`) |
 | `ui.panel.show` / `ui.panel.close` | `{panel}` | |
 | `ui.click` / `ui.move` | `{id}` or `{x,y}`, `button`, `count`, `modifiers` | synthetic pointer input |
 | `ui.drag` | `{from, to, steps, modifiers}` | press–move–release |
@@ -192,3 +193,20 @@ resizes the root split; path entries use `false` for the first child and `true` 
 the second. `{"action":{"MoveFloating":{"panel":"Info","rect":[45,65,420,320]}}}`
 repositions and resizes the floating group containing Info. Invalid actions leave the
 layout unchanged. Pointer gestures dispatch through this same catalog command.
+
+## Node grading (`grade.*`)
+
+The Color page grades a clip through a node graph (`crates/project/src/grade.rs`): Input → serial
+correctors (each a full Lumetri instance) and parallel / layer mixers → Output. `grade.info {clip?}`
+returns the graph; `grade.start`, `grade.addSerial {after?|before?}`, `grade.addParallel {at?}`,
+`grade.addLayer {at?}`, `grade.addBranch {mixer}`, `grade.removeNode`, `grade.link {from, to, input}`,
+`grade.unlink {to, input}`, `grade.setEnabled`, `grade.moveNode`, `grade.setLabel`, `grade.setMixer
+{blend, opacity}`, `grade.resetNode`, `grade.autoLayout` and `grade.reset` edit it (`clip` defaults to
+the selected video clip). A corrector's parameters are set with `effects.setParam {clip, node, param,
+value}` (`node` in place of `effect`; keyframes, `merge` and `begin` work as for stack effects), and
+`lumetri.setInputLut`, `lumetri.setLook`, `lumetri.setSection` and `lumetri.applyMatch` take `node`
+the same way. A graph that is one serial chain runs on the GPU like stack effects; mixers render on
+the CPU reference path. The node graph panel registers `nodes.*` elements (`nodes.node.<id>`,
+`nodes.port.in.<id>.<input>`, `nodes.port.out.<id>`, `nodes.add.serial|parallel|layer|branch`,
+`nodes.bypass`, `nodes.delete`, `nodes.autoLayout`, `nodes.reset`, `nodes.start`).
+

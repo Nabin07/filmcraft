@@ -13,6 +13,7 @@ pub mod caption;
 pub mod effect;
 pub mod essential;
 pub mod find;
+pub mod grade;
 pub mod graphic;
 pub mod graphic_design;
 pub mod gtemplate;
@@ -35,6 +36,7 @@ pub use caption::{Caption, CaptionAlign, CaptionAnchor, CaptionFormat, CaptionSt
 pub use effect::{EffectDef, EffectInstance, EffectKind, ParamDef, ParamKind, effect_defs, find_effect};
 pub use essential::{AudioType, EssentialSound};
 pub use find::{FindOp, FindQuery, FindRow, SearchBin};
+pub use grade::{GradeError, GradeGraph, GradeLink, GradeNode, GradeNodeKind, INPUT_ID, NodeId, OUTPUT_ID};
 pub use graphic_design::{CharStyle, GraphicMeta, LayerExtra, Pin, PinTarget, Roll, RollMode, SourceGraphic, StyleRun};
 pub use keyframe::{Interpolation, Keyframe, Param, ParamValue};
 pub use mask::{Mask, MaskMode, MaskPath, MaskVertex, TrackMethod};
@@ -568,6 +570,10 @@ pub struct TrackItem {
     /// ([`GraphicMeta`]). Schema v12.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graphic: Option<Box<GraphicMeta>>,
+    /// The Color page's node graph (serial / parallel / layer correctors), evaluated after the
+    /// effect stack. None: no node grade ([`grade`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grade: Option<GradeGraph>,
 }
 
 /// Time interpolation for speed-changed clips (Clip ▸ Video Options ▸ Time Interpolation).
@@ -673,7 +679,11 @@ impl TrackItem {
         self.effect("opacity").is_some_and(|e| e.enabled && e.masks.iter().any(|m| m.mode != mask::MaskMode::None))
     }
     pub fn has_standard_effects(&self) -> bool {
-        self.effects.iter().any(|e| e.def().is_some_and(|d| !d.intrinsic) && !graphic::is_layer(e))
+        self.effects.iter().any(|e| e.def().is_some_and(|d| !d.intrinsic) && !graphic::is_layer(e)) || self.has_grade()
+    }
+    /// A node grade that changes the picture ([`GradeGraph::is_active`]).
+    pub fn has_grade(&self) -> bool {
+        self.grade.as_ref().is_some_and(GradeGraph::is_active)
     }
     /// The graphic layers (text / shape) of a graphic clip, in paint order (first = back).
     pub fn graphic_layers(&self) -> impl Iterator<Item = &EffectInstance> {
@@ -1628,6 +1638,7 @@ impl Project {
             source_channels,
             audio_stream: 0,
             graphic: source_graphic.and_then(|sg| sg.meta.map(Box::new)),
+            grade: None,
         })
     }
 
